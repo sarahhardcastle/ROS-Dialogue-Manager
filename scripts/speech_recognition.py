@@ -2,15 +2,19 @@
 
 import rospy
 import io, os, sys, re
+import pyaudio
+from six.moves import queue
 
 from google.cloud        import speech
 from google.cloud.speech import enums
 from google.cloud.speech import types
 
-from pynput import keyboard
+from std_msgs.msg import String
 
 RATE  = 16000
 CHUNK = int(RATE/10)
+
+global client, streaming_config, listening
 listening = False
 
 class MicrophoneStream(object):
@@ -24,7 +28,7 @@ class MicrophoneStream(object):
     def __enter__(self):
         self._audio_interface = pyaudio.PyAudio()
         self._audio_stream = self._audio_interface.open(
-                format=pyaudiuo.paInt16,
+                format=pyaudio.paInt16,
                 channels=1, rate=self._rate,
                 input=True, frames_per_buffer=self._chunk,
                 stream_callback=self._fill_buffer
@@ -44,6 +48,41 @@ class MicrophoneStream(object):
         self._buff.put(in_data)
         return None, pyaudio.paContinue
 
+    def generator(self):
+        while not self.closed:
+            # Use a blocking get() to ensure there's at least one chunk of
+            # data, and stop iteration if the chunk is None, indicating the
+            # end of the audio stream.
+            chunk = self._buff.get()
+            if chunk is None:
+                return
+            data = [chunk]
+
+            # Now consume whatever other data's still buffered.
+            while True:
+                try:
+                    chunk = self._buff.get(block=False)
+                    if chunk is None:
+                        return
+                    data.append(chunk)
+                except queue.Empty:
+                    break
+
+            yield b''.join(data)
+
+
+def listen():
+    """Sets up microphone and starts listening"""
+    with MicrophoneStream(RATE, CHUNK) as stream:
+        audio_generator = stream.generator()
+        requests = (types.StreamingRecognizeRequest(audio_content=content)
+                for content in audio_generator)
+        
+        responses = client.streaming_recognize(streaming_config, requests)
+        
+        # Now, put the transcription responses to use.
+        return listen_print_loop(responses)
+
 def listen_print_loop(responses):
     """Iterates through server responses and prints them.
     The responses passed is a generator that will block until a response
@@ -56,6 +95,7 @@ def listen_print_loop(responses):
     the next result to overwrite it, until the response is a final one. For the
     final one, print a newline to preserve the finalized transcription.
                     """
+    global listening
     num_chars_printed = 0
     for response in responses:
         if not response.results:
@@ -71,7 +111,7 @@ def listen_print_loop(responses):
 
         # Display interim results, but with a carriage return at the end of the
         # line, so subsequent lines will overwrite them.
-                                 #
+                                #
         # If the previous result was longer than this one, we need to print
         # some extra spaces to overwrite the previous result
         overwrite_chars = ' ' * (num_chars_printed - len(transcript))
@@ -84,30 +124,26 @@ def listen_print_loop(responses):
             print (transcript + overwrite_chars)
 
             # Exit recognition if any of the transcribed phrases could be
-            # one of our keywords.
-            if re.search(r'\b(exit|quit)\b', transcript, re.I):
-                print 'Exiting..'
-                break
-
+            # one of our keywords.      
+            if (re.search(r'\b(exit|quit)\b', transcript, re.I)):
+                print("Exiting 1")
+                listening = False
+                return transcript
             num_chars_printed = 0
+    return ""
 
-def on_press(key):
-    global listening
-    try:
-        if (key == keyboard.Key.space):
-            listening = not listening
-            print(listening)
-    except AttributeError:
-        pass
+def preprocess_text(raw_text):
+    """Takes text, removes the word used to stop the microphone"""
+    text = raw_text.replace(" exit","").replace(" quit","")
+    return text
 
 
 def speech_recognition():
+    global client, streaming_config
     # See http://g.co/cloud/speech/docs/languages
     # for a list of supported languages.
     language_code = 'en-US'  # a BCP-47 language tag
     
-    rospy.init_node('speech_recognition')
-
     client = speech.SpeechClient()
     config = types.RecognitionConfig(
             encoding=enums.RecognitionConfig.AudioEncoding.LINEAR16,
@@ -116,22 +152,23 @@ def speech_recognition():
     streaming_config = types.StreamingRecognitionConfig(
             config=config,
             interim_results=True)
-    
-    with keyboard.Listener(
-            on_press = on_press) as listener:
-        listener.join()
 
+    pub = rospy.Publisher('speech', String, queue_size=5)
+    rospy.init_node('speech_recognition', anonymous=True)
     
-#    with MicrophoneStream(RATE, CHUNK) as stream:
-#        audio_generator = stream.generator()
-#        requests = (types.StreamingRecognizeRequest(audio_content=content)
-#                for content in audio_generator)
-#        
-#        responses = client.streaming_recognize(streaming_config, requests)
-#        
-#        # Now, put the transcription responses to use.
-#        listen_print_loop(responses)
+    rate = rospy.Rate(10)
 
+    while (not rospy.is_shutdown()):
+        print("Enter exit to quit, anything else to start")
+        text_input = raw_input()
+        if (text_input == "exit"):
+            rospy.signal_shutdown("User exit")
+        else:
+            print("Listening")
+            text = listen()
+            print ("I should be sending this: " + str(text))
+            pub.publish(preprocess_text(text))
+    rospy.spin()
 
 if __name__ == '__main__':
     try:

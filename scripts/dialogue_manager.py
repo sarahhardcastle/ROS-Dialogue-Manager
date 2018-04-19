@@ -2,39 +2,31 @@
 
 import rospy
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Twist
 from gazebo_msgs.msg import ModelStates
+from std_msgs.msg import String
 
+
+name = "turtlebot3_burger"
 location = ""
 
-#def process_speech(data):
-#    pass
+def process_speech(speech_data):
 
-def get_location(name):
-    print("Getting Location:")
-    global location, object_name
-    object_name = name
-    model_state = rospy.Subscriber('gazebo/model_states', ModelStates, check_location, queue_size=10)
-    
-    print(location)
-    return location
+    print(speech_data)
 
-def check_location(model_states):
-    global location, object_name
-    rospy.loginfo(model_states)
-    location_index = model_states.name.index(object_name)
-    print(location_index)
-
+def set_location(model_states):
+    location_index = model_states.name.index(name)
     location = model_states.pose[location_index].position
-    rospy.loginfo(location)
+    print location
 
 
 def dialogue_manager():
-#    rospy.Subscriber("speech", String, process_speech)
-#    movement_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=5)
+    rospy.Subscriber("speech", String, process_speech)
+    rospy.Subscriber('gazebo/model_states', ModelStates, set_location, queue_size=1)
+    movement_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=5)
+
 #    tts_pub = rospy.Publisher('tts', String, queue_size=3)
     rospy.init_node('dialogue_manager')
-
-    get_location("turtlebot3_burger")
 
     rospy.spin()
 
