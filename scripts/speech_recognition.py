@@ -14,8 +14,7 @@ from std_msgs.msg import String
 RATE  = 16000
 CHUNK = int(RATE/10)
 
-global client, streaming_config, listening
-listening = False
+global client, streaming_config 
 
 class MicrophoneStream(object):
     def __init__(self, rate, chunk):
@@ -95,8 +94,8 @@ def listen_print_loop(responses):
     the next result to overwrite it, until the response is a final one. For the
     final one, print a newline to preserve the finalized transcription.
                     """
-    global listening
     num_chars_printed = 0
+    transcript = ""
     for response in responses:
         if not response.results:
             continue
@@ -126,11 +125,9 @@ def listen_print_loop(responses):
             # Exit recognition if any of the transcribed phrases could be
             # one of our keywords.      
             if (re.search(r'\b(exit|quit)\b', transcript, re.I)):
-                print("Exiting 1")
-                listening = False
                 return transcript
             num_chars_printed = 0
-    return ""
+    return ""     
 
 def preprocess_text(raw_text):
     """Takes text, removes the word used to stop the microphone"""
