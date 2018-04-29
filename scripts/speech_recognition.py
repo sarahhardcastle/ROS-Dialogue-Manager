@@ -151,7 +151,7 @@ def speech_recognition():
             interim_results=True)
 
     pub = rospy.Publisher('speech', String, queue_size=5)
-    rospy.init_node('speech_recognition', anonymous=True)
+    rospy.init_node('speech_recognition')
     
     rate = rospy.Rate(10)
 
@@ -164,7 +164,9 @@ def speech_recognition():
             print("Listening")
             text = listen()
             print ("I should be sending this: " + str(text))
-            pub.publish(preprocess_text(text))
+            text_to_send = preprocess_text(text)
+            if (text_to_send):
+                pub.publish(text_to_send)
     rospy.spin()
 
 if __name__ == '__main__':
